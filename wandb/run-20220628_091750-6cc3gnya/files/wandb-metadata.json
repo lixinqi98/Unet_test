@@ -1,0 +1,27 @@
+{
+    "os": "macOS-10.16-x86_64-i386-64bit",
+    "python": "3.8.12",
+    "heartbeatAt": "2022-06-28T07:18:01.313451",
+    "startedAt": "2022-06-28T07:17:50.208129",
+    "docker": null,
+    "cpu_count": 8,
+    "cuda": null,
+    "args": [
+        "--epochs",
+        "1",
+        "--batch-size",
+        "1"
+    ],
+    "state": "running",
+    "program": "train.py",
+    "codePath": "train.py",
+    "git": {
+        "remote": "https://github.com/lixinqi98/Unet_test.git",
+        "commit": "d7ffa8fe8a00877c27009fce372e076dd93ba550"
+    },
+    "email": "lixinqi98@gmail.com",
+    "root": "/Users/mona/GitClone/Unet_test",
+    "host": "Mona-2.local",
+    "username": "mona",
+    "executable": "/usr/local/anaconda3/envs/monai_david/bin/python"
+}
