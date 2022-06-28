@@ -1,19 +1,16 @@
 import numpy as np
-import glob
+from glob import glob
 import os
 from monai.transforms import (EnsureType, Compose, LoadImaged, AddChanneld, Transpose,Activations,AsDiscrete, RandGaussianSmoothd, CropForegroundd, SpatialPadd,
                               ScaleIntensityd, ToTensord, RandSpatialCropd, Rand3DElasticd, RandAffined, RandZoomd,
     Spacingd, Orientationd, Resized, ThresholdIntensityd, RandShiftIntensityd, BorderPadd, RandGaussianNoised, RandAdjustContrastd,NormalizeIntensityd,RandFlipd)
 
 class Data():
-    def __init__(self, image, label, resolution=(3.5714, 3.5714), patch_size=(32, 32)) -> None:
+    def __init__(self, resolution=(3.5714, 3.5714), patch_size=(32, 32)) -> None:
         self.resolution = resolution
         self.patch_size = patch_size
         self.init_train_transform()
         self.init_val_transforms()
-
-        self.image_path = image
-        self.label_path = label
 
     def init_train_transform(self):   
         train = [
@@ -29,7 +26,7 @@ class Data():
 
             RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=1),
             RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=0),
-            RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=2),
+            # RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=2),
             RandAffined(keys=['image', 'label'], mode=('bilinear', 'nearest'), prob=0.1,
                         rotate_range=(np.pi / 36, np.pi / 36, np.pi * 2), padding_mode="zeros"),
             RandAffined(keys=['image', 'label'], mode=('bilinear', 'nearest'), prob=0.1,
@@ -48,7 +45,7 @@ class Data():
             RandSpatialCropd(keys=['image', 'label'], roi_size=self.patch_size, random_size=False),
             ToTensord(keys=['image', 'label'])
             ]
-        self.train_transform = Compose(train)
+        self.train_transforms = Compose(train)
     
     def init_val_transforms(self):
         val = [
@@ -68,6 +65,6 @@ class Data():
         self.val_transforms = Compose(val)
     
     def load(self, image_path, label_path):
-        images = sorted(glob(os.path.join(image_path, 'train', '*.nii')))
-        segs = sorted(glob(os.path.join(label_path, 'train', '*.nii')))
+        images = sorted(glob(os.path.join(image_path, '*.nii')))
+        segs = sorted(glob(os.path.join(label_path, '*.nii')))
         return images, segs

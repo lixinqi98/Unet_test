@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-
+import numpy as np
 from utils.dice_score import multiclass_dice_coeff, dice_coeff
 
 
@@ -12,10 +12,10 @@ def evaluate(net, dataloader, device):
 
     # iterate over the validation set
     for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', leave=False):
-        image, mask_true = batch['image'], batch['mask']
+        image, mask_true = batch['image'], batch['label']
         # move images and labels to correct device and type
         image = image.to(device=device, dtype=torch.float32)
-        mask_true = mask_true.to(device=device, dtype=torch.long)
+        mask_true = mask_true.to(device=device, dtype=torch.long)[0]
         mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 3, 1, 2).float()
 
         with torch.no_grad():

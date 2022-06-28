@@ -13,39 +13,51 @@ from torch import optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import monai
+from monai.data import list_data_collate
 from utils.data_loading import BasicDataset
 from utils.dice_score import dice_loss, dice_coeff, multiclass_dice_coeff
 from evaluate import evaluate
 from unet import UNet
 from sklearn.model_selection import KFold, GroupKFold
-from dataload import transformation
+from dataload import Data
 
-dir_img = Path('/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/imgs')
-dir_mask = Path('/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/masks')
+dir_img = '/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/imgs'
+dir_mask = '/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/masks'
 dir_checkpoint = Path('./checkpoints/test')
-global_step = 0
+display_name = 'test'
+
+
 
 def main(device, 
-         epochs: int = 5, 
-         batch_size: int = 128, 
-         learning_rate: float = 0.001, 
-         test_percent: float = 0.1, 
-         img_scale: float = 1, 
-         amp: bool = False,
-         channels: int = 1, 
-         classes: int = 2):
-
+        epochs: int = 5, 
+        batch_size: int = 128, 
+        learning_rate: float = 0.001, 
+        test_percent: float = 0.2, 
+        img_scale: float = 1, 
+        amp: bool = False,
+        channels: int = 1, 
+        classes: int = 2):
     # 1. Create dataset, load .npy files
-    dataset = BasicDataset(dir_img, dir_mask, img_scale)
-
-    n_train = len(dataset) - int(test_percent * len(dataset))
-    n_test = len(dataset) - n_train
+    data_util = Data()
+    data_images, data_labels = data_util.load(dir_img, dir_mask)
 
     # (Initialize logging)
-    experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+    experiment = wandb.init(project='U-Net', resume='allow', name=display_name)
     experiment.config.update(dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-                                  test_num=n_test, img_scale=img_scale, amp=amp))
-    trans = transformation()
+                                  img_scale=img_scale, amp=amp))
+    n_test = len(data_images) * test_percent
+    n_train = len(data_images) - n_test   
+
+    net = UNet(n_channels=channels, n_classes=classes, bilinear=True)
+    net.to(device)
+    # net.apply(reset_weights)
+
+    optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2)  # goal: maximize Dice score
+    grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    criterion = nn.CrossEntropyLoss()
+    Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+
     logging.info(f'''Starting training:
         Epochs:          {epochs}
         Batch size:      {batch_size}
@@ -56,104 +68,44 @@ def main(device,
         Images scaling:  {img_scale}
         Mixed Precision: {amp}
     ''')
-
-    # Start group kfold
-    test_kfold = KFold(n_splits=int(1/test_percent), shuffle=True)
-    test_scores = []
-    for fold, (train_ids, test_ids) in enumerate(test_kfold.split(dataset)):
-        print(f'Fold {fold}')
-        print('----------------------------------')
-
-        train_sampler = torch.utils.data.SubsetRandomSampler(train_ids)
-        test_sampler = torch.utils.data.SubsetRandomSampler(test_ids)
-
-        # trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=4, sampler=train_sampler)
-        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=4, sampler=test_sampler)
-        net = UNet(n_channels=channels, n_classes=classes, bilinear=True)
-        net.to(device)
-        # net.apply(reset_weights)
-        optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2)  # goal: maximize Dice score
-        grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-        criterion = nn.CrossEntropyLoss()
-        
-        try:
-            net = train_net(net, experiment, fold, train_ids, dataset, device, epochs, batch_size, amp, optimizer, scheduler, grad_scaler, criterion, trans)
-        except KeyboardInterrupt:
-            torch.save(net.state_dict(), 'INTERRUPTED.pth')
-            logging.info('Saved interrupt')
-            sys.exit(0)
-        # test_score = evaluate(net, test_loader, device)
-        
-        net.eval()
-        num_val_batches = len(test_loader)
-        dice_score = 0
-
-        # iterate over the validation set
-        for batch in tqdm(test_loader, total=num_val_batches, desc='Test round', unit='batch', leave=False):
-            image, mask_true = batch['image'], batch['mask']
-            # move images and labels to correct device and type
-            image = image.to(device=device, dtype=torch.float32)
-            mask_true = mask_true.to(device=device, dtype=torch.long)
-            mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 3, 1, 2).float()
-
-            with torch.no_grad():
-                # predict the mask
-                mask_pred = net(image)
-
-                # convert to one-hot format
-                if net.n_classes == 1:
-                    mask_pred = (F.sigmoid(mask_pred) > 0.5).float()
-                    # compute the Dice score
-                    dice_score += dice_coeff(mask_pred, mask_true, reduce_batch_first=False)
-                else:
-                    mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 3, 1, 2).float()
-                    # compute the Dice score, ignoring background
-                    dice_score += multiclass_dice_coeff(mask_pred[:, 1:, ...], mask_true[:, 1:, ...], reduce_batch_first=False)
-            
-            experiment.log({
-                'model': fold,
-                'Test Dice': dice_score,
-                'test_images': wandb.Image(image[0].cpu()),
-                'test_masks': {
-                    'true': wandb.Image(mask_true[0].float().cpu()),
-                    'pred': wandb.Image(torch.softmax(mask_pred, dim=1).argmax(dim=1)[0].float().cpu()),
-                }
-            })
-        # Fixes a potential division by zero error
-        if num_val_batches != 0:
-            test_score = dice_score
-        test_score = dice_score / num_val_batches
-
-        logging.info('Test Dice score for fold {}: {}'.format(fold, test_score))
-        test_scores.append(test_score.cpu())
-    print(f"Mean of Test Dice score {np.array(test_scores).mean()} and std is {np.array(test_scores).std()}")
-
-
-def train_net(net, experiment, model_index, train_sampler, dataset,
-              device, epochs, batch_size, amp, 
-              optimizer, scheduler, grad_scaler, criterion, trans):
-
-    # Begin training
+    # 
     kfold = KFold(n_splits=5, shuffle=True)
+    # test_scores = []
+    global_step = 0
     best_model = net
     best_score = 0
-    val_score = 0
-    for fold, (train_ids, val_ids) in enumerate(kfold.split(train_sampler)):
-        print(f"----------Cross Validation Fold {fold} --------------")
-        train_sampler = torch.utils.data.SubsetRandomSampler(train_ids)
-        val_sampler = torch.utils.data.SubsetRandomSampler(val_ids)
+    val_scores= []
+    for fold, (train_ids, test_ids) in enumerate(kfold.split(data_images)):
+        print(f'Fold {fold}')
+        print('----------------------------------')
+        test_images = list(map(data_images.__getitem__, test_ids))
+        test_labels = list(map(data_labels.__getitem__, test_ids))
 
-        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=4, sampler=train_sampler, transform=trans.train_transform)
-        val_loader = DataLoader(dataset, batch_size=batch_size, num_workers=4, sampler=val_sampler, transform=trans.val_transform)
+        train_images = list(map(data_images.__getitem__, train_ids))
+        train_labels = list(map(data_labels.__getitem__, train_ids))
+
+        test_dicts = [{'image': image_name, 'label': label_name}
+                for image_name, label_name in zip(test_images, test_labels)]
+
+        train_dicts = [{'image': image_name, 'label': label_name}
+                    for image_name, label_name in zip(train_images, train_labels)]
+                    
+        check_val = monai.data.Dataset(data=test_dicts, transform=data_util.val_transforms)
+        check_train = monai.data.Dataset(data=train_dicts, transform=data_util.train_transforms)
+        train_loader = DataLoader(check_train, batch_size=batch_size, num_workers=4, collate_fn=list_data_collate, pin_memory=False, shuffle=True)
+        val_loader = DataLoader(check_val, batch_size=1, num_workers=4, collate_fn=list_data_collate, pin_memory=False)
+        
+    # net.apply(reset_weights)
+
         n_train = len(train_loader)
         for epoch in range(epochs):
-            net.train()
+            # net.train()
             epoch_loss = 0
             with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
                 for batch in train_loader:
+                    net.train()
                     images = batch['image']
-                    true_masks = batch['mask']
+                    true_masks = batch['label']
 
                     assert images.shape[1] == net.n_channels, \
                         f'Network has been defined with {net.n_channels} input channels, ' \
@@ -161,7 +113,7 @@ def train_net(net, experiment, model_index, train_sampler, dataset,
                         'the images are loaded correctly.'
 
                     images = images.to(device=device, dtype=torch.float32)
-                    true_masks = true_masks.to(device=device, dtype=torch.long)
+                    true_masks = np.squeeze(true_masks.to(device=device, dtype=torch.long))
 
                     with torch.cuda.amp.autocast(enabled=amp):
                         masks_pred = net(images)
@@ -176,7 +128,6 @@ def train_net(net, experiment, model_index, train_sampler, dataset,
                     grad_scaler.update()
 
                     pbar.update(images.shape[0])
-                    global global_step
                     global_step += 1
                     epoch_loss += loss.item()
                     experiment.log({
@@ -188,8 +139,7 @@ def train_net(net, experiment, model_index, train_sampler, dataset,
                     pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                     # Evaluation round
-                    division_step = (n_train // (10 * batch_size))
-                    # division_step = 10
+                    division_step = n_train // 2
                     if division_step > 0:
                         if global_step % division_step == 0:
                             histograms = {}
@@ -203,7 +153,6 @@ def train_net(net, experiment, model_index, train_sampler, dataset,
 
                             logging.info('Validation Dice score: {}'.format(val_score))
                             experiment.log({
-                                'model': model_index,
                                 'fold': fold,
                                 'learning rate': optimizer.param_groups[0]['lr'],
                                 'validation Dice': val_score,
@@ -216,13 +165,13 @@ def train_net(net, experiment, model_index, train_sampler, dataset,
                                 'epoch': epoch,
                                 **histograms
                             })
-
-            if val_score > best_score:
-                best_model = net
-
-    Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
-    torch.save(best_model.state_dict(), str(dir_checkpoint / 'best_model_fold_{}.pth'.format(model_index)))
-    logging.info(f'Best Model with val score {best_score} in fold {model_index} has been saved')
+        val_scores.append(val_score)
+        if val_score > best_score:
+            best_model = net
+            torch.save(best_model.state_dict(), str(dir_checkpoint / 'best_model_fold.pth'))
+        logging.info(f'Best Model with val score {best_score} has been saved')
+        print(f"In fold {fold}, val score {val_score}")
+    print(f"The average dice score is {np.mean(np.array(val_scores))}")
     return best_model
 
 
@@ -254,14 +203,4 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
     main(device, epochs=args.epochs, batch_size=args.batch_size, learning_rate=args.lr)
-
-    # Change here to adapt to your data
-    # n_channels=3 for RGB images
-    # n_classes is the number of probabilities you want to get per pixel
-    # net = UNet(n_channels=1, n_classes=2, bilinear=True)
-
-    # logging.info(f'Network:\n'
-    #              f'\t{n_channels} input channels\n'
-    #              f'\t{net.n_classes} output channels (classes)\n'
-    #              f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
 
