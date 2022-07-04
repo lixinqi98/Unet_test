@@ -21,9 +21,9 @@ from unet import UNet
 from sklearn.model_selection import KFold, GroupKFold
 from dataload import Data
 
-dir_img = '/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/imgs'
-dir_mask = '/Users/mona/codeWorkSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/masks'
-dir_checkpoint = Path('./checkpoints/test')
+dir_img = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/original_equalization_axial_mag_1ch_resolutionmatch/imgs'
+dir_mask = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/original_equalization_axial_mag_1ch_resolutionmatch/masks'
+dir_checkpoint = Path('./checkpoints/test_resolution')
 display_name = 'test'
 
 
