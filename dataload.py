@@ -7,12 +7,14 @@ from torch.utils.data import DataLoader
 import SimpleITK as sitk
 from monai.transforms import (EnsureType, Compose, LoadImaged, AddChanneld, Transpose,Activations,AsDiscrete, RandGaussianSmoothd, CropForegroundd, SpatialPadd,
                               ScaleIntensityd, ToTensord, RandSpatialCropd, Rand3DElasticd, RandAffined, RandZoomd,
-    Spacingd, Orientationd, Resized, ThresholdIntensityd, RandShiftIntensityd, BorderPadd, RandGaussianNoised, RandAdjustContrastd,NormalizeIntensityd,RandFlipd)
+    Spacingd, Orientationd, Resized, ThresholdIntensityd, RandShiftIntensityd, BorderPadd, RandGaussianNoised, RandAdjustContrastd,NormalizeIntensityd,RandFlipd,
+    AsChannelFirstd)
 
 class Data():
     def __init__(self, resolution=(3.5714, 3.5714), patch_size=(64, 64)) -> None:
         self.resolution = resolution
         self.patch_size = patch_size
+        self.spatial_size = (30, 85)
         self.init_train_transform()
         self.init_val_transforms()
         self.init_test_transforms()
@@ -20,19 +22,20 @@ class Data():
     def init_train_transform(self):   
         train = [
             LoadImaged(keys=['image', 'label']),
-            AddChanneld(keys=['image', 'label']),
+            AddChanneld(keys=['label']),
+            AsChannelFirstd(keys=['image']),
             # ThresholdIntensityd(keys=['image'], threshold=-135, above=True, cval=-135),  # CT HU filter
             # ThresholdIntensityd(keys=['image'], threshold=215, above=False, cval=215),
             CropForegroundd(keys=['image', 'label'], source_key='image'),               # crop CropForeground
 
             NormalizeIntensityd(keys=['image']),                                          # augmentation
-            ScaleIntensityd(keys=['image']),                                              # intensity
-            Spacingd(keys=['image', 'label'], pixdim=self.resolution, mode=('bilinear', 'nearest')),  # resolution
+            ScaleIntensityd(keys=['image', 'label']),                                              # intensity
+            # Spacingd(keys=['image', 'label'], pixdim=((1,)+self.resolution), mode=('bilinear', 'nearest')),  # resolution
 
             RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=1),
             RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=0),
             # RandFlipd(keys=['image', 'label'], prob=0.15, spatial_axis=2),
-            RandAffined(keys=['image', 'label'], mode=('bilinear', 'nearest'), prob=0.1,
+            RandAffined(keys=['image', 'label'], mode=('bilinear', 'nearest'), prob=1,
                         rotate_range=(np.pi / 36, np.pi / 36, np.pi * 2), padding_mode="zeros"),
             RandAffined(keys=['image', 'label'], mode=('bilinear', 'nearest'), prob=0.1,
                         rotate_range=(np.pi / 36, np.pi / 2, np.pi / 36), padding_mode="zeros"),
@@ -55,14 +58,16 @@ class Data():
     def init_val_transforms(self):
         val = [
             LoadImaged(keys=['image', 'label']),
-            AddChanneld(keys=['image', 'label']),
+            AddChanneld(keys=['label']),
+            AsChannelFirstd(keys=['image']),
+            # AddChanneld(keys=['image', 'label']),
             # ThresholdIntensityd(keys=['image'], threshold=-135, above=True, cval=-135),
             # ThresholdIntensityd(keys=['image'], threshold=215, above=False, cval=215),
             CropForegroundd(keys=['image', 'label'], source_key='image'),                   # crop CropForeground
 
             NormalizeIntensityd(keys=['image']),                                      # intensity
-            ScaleIntensityd(keys=['image']),
-            Spacingd(keys=['image', 'label'], pixdim=self.resolution, mode=('bilinear', 'nearest')),  # resolution
+            ScaleIntensityd(keys=['image', 'label']),
+            # Spacingd(keys=['image', 'label'], pixdim=self.resolution, mode=('bilinear', 'nearest')),  # resolution
 
             SpatialPadd(keys=['image', 'label'], spatial_size=self.patch_size, method= 'end'),  # pad if the image is smaller than patch
             ToTensord(keys=['image', 'label'])
@@ -73,14 +78,15 @@ class Data():
     def init_test_transforms(self):
         test = Compose([
                 LoadImaged(keys=['image']),
-                AddChanneld(keys=['image']),
+                AsChannelFirstd(keys=['image']),
+                # AddChanneld(keys=['image']),
                 # ThresholdIntensityd(keys=['image'], threshold=-135, above=True, cval=-135),  # Threshold CT
                 # ThresholdIntensityd(keys=['image'], threshold=215, above=False, cval=215),
                 CropForegroundd(keys=['image'], source_key='image'),  # crop CropForeground
 
                 NormalizeIntensityd(keys=['image']),  # intensity
                 ScaleIntensityd(keys=['image']),
-                Spacingd(keys=['image'], pixdim=self.resolution, mode=('bilinear')),  # resolution
+                # Spacingd(keys=['image'], pixdim=self.resolution, mode=('bilinear')),  # resolution
 
                 SpatialPadd(keys=['image'], spatial_size=self.patch_size, method= 'end'),  # pad if the image is smaller than patch
                 ToTensord(keys=['image'])])
@@ -90,15 +96,16 @@ class Data():
     def init_reverse(self, crop_shape):
         revert = Compose([
             LoadImaged(keys=['image']),
-            AddChanneld(keys=['image']),
-            Spacingd(keys=['image'], pixdim=self.resolution, mode=('nearest')),
+            AsChannelFirstd(keys=['image']),
+            # AddChanneld(keys=['image']),
+            # Spacingd(keys=['image'], pixdim=self.resolution, mode=('nearest')),
             Resized(keys=['image'], spatial_size=crop_shape, mode=('nearest')),
         ])
         self.reverse_transforms = revert
     
     def load(self, image_path, label_path):
-        images = sorted(glob(os.path.join(image_path, '*.nii')))
-        segs = sorted(glob(os.path.join(label_path, '*.nii')))
+        images = sorted(glob(os.path.join(image_path, '*.png')))
+        segs = sorted(glob(os.path.join(label_path, '*.png')))
         return images, segs
 
     def statistics_crop(self, image, resolution):
@@ -113,7 +120,7 @@ class Data():
         # original size
         transforms = Compose([
             LoadImaged(keys=['image']),
-            AddChanneld(keys=['image']),
+            # AddChanneld(keys=['image']),
             ToTensord(keys=['image'])])
         data = monai.data.Dataset(data=files, transform=transforms)
         loader = DataLoader(data, batch_size=1, num_workers=0, pin_memory=torch.cuda.is_available())
@@ -125,7 +132,7 @@ class Data():
         # cropped foreground size
         transforms = Compose([
             LoadImaged(keys=['image']),
-            AddChanneld(keys=['image']),
+            # AddChanneld(keys=['image']),
             CropForegroundd(keys=['image'], source_key='image', start_coord_key='foreground_start_coord',
                             end_coord_key='foreground_end_coord', ),  # crop CropForeground
             ToTensord(keys=['image', 'foreground_start_coord', 'foreground_end_coord'])])
@@ -143,9 +150,9 @@ class Data():
 
             transforms = Compose([
                 LoadImaged(keys=['image']),
-                AddChanneld(keys=['image']),
+                # AddChanneld(keys=['image']),
                 CropForegroundd(keys=['image'], source_key='image'),  # crop CropForeground
-                Spacingd(keys=['image'], pixdim=resolution, mode=('bilinear')),  # resolution
+                # Spacingd(keys=['image'], pixdim=resolution, mode=('bilinear')),  # resolution
                 ToTensord(keys=['image'])])
 
             data = monai.data.Dataset(data=files, transform=transforms)

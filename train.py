@@ -21,9 +21,9 @@ from unet import UNet
 from sklearn.model_selection import KFold, GroupKFold
 from dataload import Data
 
-dir_img = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/original_equalization_axial_mag_1ch_resolutionmatch/imgs'
-dir_mask = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/original_equalization_axial_mag_1ch_resolutionmatch/masks'
-dir_checkpoint = Path('./checkpoints/test_resolution')
+dir_img = '/Users/mona/Library/CloudStorage/OneDrive-Personal/Cedars-sinai/Unet/original_axial_3ch/imgs'
+dir_mask = '/Users/mona/Library/CloudStorage/OneDrive-Personal/Cedars-sinai/Unet/original_axial_3ch/masks'
+dir_checkpoint = Path('./checkpoints/test')
 display_name = 'test'
 
 
@@ -35,7 +35,7 @@ def main(device,
         test_percent: float = 0.2, 
         img_scale: float = 1, 
         amp: bool = False,
-        channels: int = 1, 
+        channels: int = 3, 
         classes: int = 2):
     # 1. Create dataset, load .npy files
     data_util = Data()
@@ -103,7 +103,7 @@ def main(device,
             epoch_loss = 0
             with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
                 for batch in train_loader:
-                    net.train()
+                    # net.train()
                     images = batch['image']
                     true_masks = batch['label']
 
@@ -165,7 +165,7 @@ def main(device,
                                 'epoch': epoch,
                                 **histograms
                             })
-        val_scores.append(val_score)
+        val_scores.append(val_score.cpu())
         if val_score > best_score:
             best_model = net
             torch.save(best_model.state_dict(), str(dir_checkpoint / 'best_model_fold.pth'))
