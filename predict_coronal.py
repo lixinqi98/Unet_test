@@ -110,9 +110,9 @@ def resolution_match(result_array, data_util, coord1, coord2):
 
 
 if __name__ == '__main__':
-    input_path = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/target_data_axial_1ch_equal_resolutionmatch'
-    path = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/dataoutput/target_data_axial_1ch_equal_resolutionmatch'
-    model = f"checkpoints/test_resolution/best_model_fold.pth"
+    input_path = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/data/target_data_coronal_1ch_equal_resolutionmatch'
+    path = '/Users/mona/workSpace/github_repo/DeepShim/code/python/Pytorch-UNet/dataoutput/target_data_coronal_1ch_equal_resolutionmatch'
+    model = f"checkpoints/coronal_2/best_model_fold.pth"
 
     if not os.path.exists(path):
         os.makedirs(path)
@@ -159,6 +159,9 @@ if __name__ == '__main__':
 
     masks = np.dstack(masks)
     images = np.dstack(images)
+
+    masks = masks.transpose((0, 2, 1))
+    images = masks.transpose((0, 2, 1))
 
     # masks_img = data_util.from_numpy_to_itk(masks, image)
     # images_img = data_util.from_numpy_to_itk(images, image)

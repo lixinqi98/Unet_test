@@ -11,7 +11,7 @@ from monai.transforms import (EnsureType, Compose, LoadImaged, AddChanneld, Tran
     AsChannelFirstd)
 
 class Data():
-    def __init__(self, resolution=(3.5714, 5.7), patch_size=(64, 64)) -> None:
+    def __init__(self, resolution=(3.5714, 3.5714), patch_size=(64, 64)) -> None:
         self.resolution = resolution
         self.patch_size = patch_size
         self.spatial_size = (30, 85)
